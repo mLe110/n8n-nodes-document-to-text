@@ -110,12 +110,6 @@ export class DocumentToText implements INodeType {
 				type: 'number',
 				default: 0.2,
 			},
-			{
-				displayName: 'Attach Output as File',
-				name: 'attachBinary',
-				type: 'boolean',
-				default: false,
-			},
 		],
 	};
 	helpers: any;
@@ -134,7 +128,6 @@ export class DocumentToText implements INodeType {
 		const scale = this.getNodeParameter('scale', 0) as number;
 		const pagesPerRequest = this.getNodeParameter('pagesPerRequest', 0) as number;
 		const temperature = this.getNodeParameter('temperature', 0) as number;
-		//const attachBinary = this.getNodeParameter('attachBinary', 0) as boolean;
 
 		this.logger?.info('Document To Text', {
 			node: this.getNode().name,
@@ -159,12 +152,7 @@ export class DocumentToText implements INodeType {
 			for (let p = 0; p < pages.length; p += pagesPerRequest) {
 				const batch = pages.slice(p, p + pagesPerRequest);
 
-				// todo ml check messages -> system + user
 				const userContent: any[] = [
-					//{
-					//	type: 'text',
-					//	text: systemPrompt,
-					//},
 					...batch.flatMap((b, idx) => [
 						{ type: 'text', text: `Page ${p + idx + 1}:` },
 						{
@@ -207,26 +195,6 @@ export class DocumentToText implements INodeType {
 			const out: INodeExecutionData = {
 				json: { output, pages: pages.length },
 			};
-
-			//if (attachBinary) {
-			//	const ext = outputFormat === 'md' ? 'md' : outputFormat === 'html' ? 'html' : 'json';
-			//	const buf = Buffer.from(
-			//		outputFormat === 'json' ? JSON.stringify(JSON.parse(output), null, 2) : output,
-			//		'utf-8',
-			//	);
-			//	out.binary = {
-			//		output: {
-			//			data: buf.toString('base64'),
-			//			fileName: (pdfBin.fileName || 'output') + '.' + ext,
-			//			mimeType:
-			//				outputFormat === 'html'
-			//					? 'text/html'
-			//					: outputFormat === 'json'
-			//						? 'application/json'
-			//						: 'text/markdown',
-			//		},
-			//	};
-			//}
 
 			returnItems.push(out);
 		}
