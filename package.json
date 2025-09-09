@@ -35,8 +35,7 @@
 		"n8nNodesApiVersion": 1,
 		"credentials": [],
 		"nodes": [
-			"dist/nodes/DocumentToText/DocumentToText.node.js",
-			"dist/nodes/HttpBin/HttpBin.node.js"
+			"dist/nodes/DocumentToText/DocumentToText.node.js"
 		]
 	},
 	"devDependencies": {
