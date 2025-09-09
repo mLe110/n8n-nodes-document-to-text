@@ -1,5 +1,6 @@
 import type {
 	IExecuteFunctions,
+	INode,
 	INodeExecutionData,
 	INodeType,
 	INodeTypeDescription,
@@ -99,16 +100,16 @@ export class DocumentToText implements INodeType {
 				description: 'Rendering zoom (~DPI). 1.6 is a good default.',
 			},
 			{
-				displayName: 'Max Pages per Request',
-				name: 'pagesPerRequest',
-				type: 'number',
-				default: 4,
-			},
-			{
 				displayName: 'Temperature',
 				name: 'temperature',
 				type: 'number',
 				default: 0.2,
+			},
+			{
+				displayName: 'Max Parallel Requests',
+				name: 'maxParallelRequests',
+				type: 'number',
+				default: 1,
 			},
 		],
 	};
@@ -126,8 +127,8 @@ export class DocumentToText implements INodeType {
 		const apiVersion = String(creds.apiVersion || '2024-02-15-preview');
 
 		const scale = this.getNodeParameter('scale', 0) as number;
-		const pagesPerRequest = this.getNodeParameter('pagesPerRequest', 0) as number;
 		const temperature = this.getNodeParameter('temperature', 0) as number;
+		const maxParallelRequests = this.getNodeParameter('maxParallelRequests', 0) as number;
 
 		this.logger?.info('Document To Text', {
 			node: this.getNode().name,
@@ -139,7 +140,6 @@ export class DocumentToText implements INodeType {
 		for (let i = 0; i < items.length; i++) {
 			const documentBinary = this.getNodeParameter('documentBinary', i) as string;
 			const documentBuffer = Buffer.from(documentBinary, 'base64');
-			//const documentBuffer = Buffer.from(pdfBin.data, pdfBin.encoding || 'base64');
 
 			const pages = await renderPdfToPngBuffers(documentBuffer, scale);
 
@@ -147,48 +147,77 @@ export class DocumentToText implements INodeType {
 				throw new NodeOperationError(this.getNode(), 'PDF has zero pages after rendering.');
 			}
 
-			// ---- Batch call Azure OpenAI ----
 			let merged = '';
-			for (let p = 0; p < pages.length; p += pagesPerRequest) {
-				const batch = pages.slice(p, p + pagesPerRequest);
+			for (let p = 0; p < pages.length; p += maxParallelRequests) {
+				const batch = pages.slice(p, p + maxParallelRequests);
 
-				const userContent: any[] = [
-					...batch.flatMap((b, idx) => [
-						{ type: 'text', text: `Page ${p + idx + 1}:` },
-						{
-							type: 'image_url',
-							image_url: { url: `data:image/png;base64,${b.toString('base64')}` },
-						},
-					]),
-				];
-
-				const body = {
+				const requestBodies = batch.map((b, idx) => ({
 					messages: [
 						{ role: 'system', content: systemPrompt },
-						{ role: 'user', content: userContent },
+						{
+							role: 'user',
+							content: [
+								{ type: 'text', text: `Page ${p + idx + 1}:` },
+								{
+									type: 'image_url',
+									image_url: { url: `data:image/png;base64,${b.toString('base64')}` },
+								},
+							],
+						},
 					],
 					temperature,
-					max_tokens: 4000,
-				};
+				}));
+
+				try {
+					const responses = await Promise.all(
+						requestBodies.map((body) =>
+							callAzureOpenAi(endpoint, modelName, apiVersion, apiKey, body, this.getNode()),
+						),
+					);
+
+					merged += responses.map((r) => r.choices[0].message.content).join('\n\n');
+				} catch (error) {
+					throw new NodeOperationError(this.getNode(), error);
+				}
+
+				//const userContent: any[] = [
+				//	...batch.flatMap((b, idx) => [
+				//		{ type: 'text', text: `Page ${p + idx + 1}:` },
+				//		{
+				//			type: 'image_url',
+				//			image_url: { url: `data:image/png;base64,${b.toString('base64')}` },
+				//		},
+				//	]),
+				//];
+
+				//const body = {
+				//	messages: [
+				//		{ role: 'system', content: systemPrompt },
+				//		{ role: 'user', content: userContent },
+				//	],
+				//	temperature,
+				//	max_tokens: 4000,
+				//};
 
 				// todo ml simplify
-				const url = `${endpoint}openai/deployments/${encodeURIComponent(modelName)}/chat/completions?api-version=${encodeURIComponent(apiVersion)}`;
-				const res = await fetch(url, {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-						'api-key': apiKey,
-					} as any,
-					body: JSON.stringify(body),
-				});
+				//const url = `${endpoint}openai/deployments/${encodeURIComponent(modelName)}/chat/completions?api-version=${encodeURIComponent(apiVersion)}`;
 
-				if (!res.ok) {
-					const t = await res.text();
-					throw new NodeOperationError(this.getNode(), `Azure OpenAI error ${res.status}: ${t}`);
-				}
-				const data = await res.json();
+				//const res = await fetch(url, {
+				//	method: 'POST',
+				//	headers: {
+				//		'Content-Type': 'application/json',
+				//		'api-key': apiKey,
+				//	} as any,
+				//	body: JSON.stringify(body),
+				//});
+
+				//if (!res.ok) {
+				//	const t = await res.text();
+				//	throw new NodeOperationError(this.getNode(), `Azure OpenAI error ${res.status}: ${t}`);
+				//}
+				//const data = await res.json();
 				// todo ml fix
-				merged += ((data as any)?.choices?.[0]?.message?.content ?? '') + '\n\n';
+				//merged += ((data as any)?.choices?.[0]?.message?.content ?? '') + '\n\n';
 			}
 
 			const output = merged.trim();
@@ -204,6 +233,82 @@ export class DocumentToText implements INodeType {
 }
 
 /** ---------- Helpers ---------- */
+
+async function callAzureOpenAi(
+	endpoint: string,
+	modelName: string,
+	apiVersion: string,
+	apiKey: string,
+	body: any,
+	node: INode,
+): Promise<any> {
+	const base = (endpoint || '').trim();
+	const baseWithSlash = base.endsWith('/') ? base : base + '/';
+	const url = `${baseWithSlash}openai/deployments/${encodeURIComponent(modelName)}/chat/completions?api-version=${encodeURIComponent(apiVersion)}`;
+
+	try {
+		const res = await fetchWithRetry(url, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				'api-key': apiKey,
+			} as any,
+			body: JSON.stringify(body),
+		});
+
+		if (!res.ok) {
+			const t = await res.text();
+			throw new NodeOperationError(node, `Azure OpenAI error ${res.status}: ${t}`);
+		}
+		const data = await res.json();
+		return data;
+	} catch (error) {
+		throw new NodeOperationError(
+			node,
+			`Error resolving response from Azure OpenAI: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+}
+
+interface RetryOptions {
+	retries?: number;
+	backoffMs?: number;
+	retryOn?: number[];
+}
+
+function sleep(ms: number) {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithRetry(url: string, init?: any, options: RetryOptions = {}): Promise<any> {
+	const { retries = 3, backoffMs = 500, retryOn = [429, 500, 502, 503, 504] } = options;
+
+	let lastError: any;
+	for (let attempt = 1; attempt <= retries; attempt++) {
+		try {
+			const res = await fetch(url, init as any);
+
+			if (!res || typeof res.status !== 'number') {
+				lastError = new Error('Invalid fetch response');
+			} else if (!retryOn.includes(res.status)) {
+				return res; // success or non-retryable HTTP status
+			} else {
+				lastError = new Error(`Retryable HTTP ${res.status}`);
+			}
+		} catch (err) {
+			lastError = err;
+		}
+
+		if (attempt < retries) {
+			const delay = backoffMs * Math.pow(2, attempt - 1);
+			// eslint-disable-next-line no-console
+			console.warn(`Fetch failed (attempt ${attempt}), retrying in ${delay}ms...`);
+			await sleep(delay);
+		}
+	}
+
+	throw lastError;
+}
 
 async function renderPdfToPngBuffers(pdfBuffer: Buffer, scale = 1.6): Promise<Buffer[]> {
 	const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(pdfBuffer) });
