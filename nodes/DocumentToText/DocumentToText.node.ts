@@ -6,8 +6,6 @@ import type {
 	INodeTypeDescription,
 } from 'n8n-workflow';
 import { NodeConnectionType, NodeOperationError } from 'n8n-workflow';
-//import { AzureOpenAI } from 'openai';
-import '@azure/openai/types';
 
 const pdfjsLib = require('pdfjs-dist/legacy/build/pdf.mjs');
 pdfjsLib.GlobalWorkerOptions.disableWorker = true;
@@ -25,7 +23,6 @@ import DOMMatrix from '@thednp/dommatrix';
 (globalThis as any).Path2D = NapiPath2D;
 (globalThis as any).DOMMatrix = (globalThis as any).DOMMatrix || DOMMatrix;
 
-// CanvasFactory backed by @napi-rs/canvas
 const canvasFactory = {
 	create(width: number, height: number) {
 		const canvas = createCanvas(Math.max(1, Math.floor(width)), Math.max(1, Math.floor(height)));
@@ -179,45 +176,6 @@ export class DocumentToText implements INodeType {
 				} catch (error) {
 					throw new NodeOperationError(this.getNode(), error);
 				}
-
-				//const userContent: any[] = [
-				//	...batch.flatMap((b, idx) => [
-				//		{ type: 'text', text: `Page ${p + idx + 1}:` },
-				//		{
-				//			type: 'image_url',
-				//			image_url: { url: `data:image/png;base64,${b.toString('base64')}` },
-				//		},
-				//	]),
-				//];
-
-				//const body = {
-				//	messages: [
-				//		{ role: 'system', content: systemPrompt },
-				//		{ role: 'user', content: userContent },
-				//	],
-				//	temperature,
-				//	max_tokens: 4000,
-				//};
-
-				// todo ml simplify
-				//const url = `${endpoint}openai/deployments/${encodeURIComponent(modelName)}/chat/completions?api-version=${encodeURIComponent(apiVersion)}`;
-
-				//const res = await fetch(url, {
-				//	method: 'POST',
-				//	headers: {
-				//		'Content-Type': 'application/json',
-				//		'api-key': apiKey,
-				//	} as any,
-				//	body: JSON.stringify(body),
-				//});
-
-				//if (!res.ok) {
-				//	const t = await res.text();
-				//	throw new NodeOperationError(this.getNode(), `Azure OpenAI error ${res.status}: ${t}`);
-				//}
-				//const data = await res.json();
-				// todo ml fix
-				//merged += ((data as any)?.choices?.[0]?.message?.content ?? '') + '\n\n';
 			}
 
 			const output = merged.trim();

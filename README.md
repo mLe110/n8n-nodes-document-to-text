@@ -6,7 +6,7 @@
 [Operations](#operations)  
 [Credentials](#credentials) <!-- delete if no auth needed -->  
 [Compatibility](#compatibility)  
-[Usage](#usage) <!-- delete if not using this section -->  
+[Usage](#usage)  
 [Development](#development)  
 [Publishing](#publishing)  
 [Resources](#resources)
@@ -17,29 +17,80 @@ Follow the [installation guide](https://docs.n8n.io/integrations/community-nodes
 
 ## Operations
 
-_List the operations supported by your node._
-TODO ml update
+This package provides a single node: `Document To Text`.
+
+- Converts PDF documents to plain text using Azure OpenAI vision-capable chat models.
+- Renders each PDF page to a PNG image and sends it to your Azure OpenAI deployment via the Chat Completions API.
+- Merges the per‑page responses in order into a single `output` string.
+
+Inputs
+
+- `Document` (required): Base64 string of the PDF to convert. In n8n, reference the incoming binary data with an expression like `{{ $binary.myPdf.data }}`.
+
+Parameters
+
+- `Model (Deployment) Name` (required): The Azure OpenAI deployment name for your vision‑enabled model (for example, `gpt-4o`, `gpt-4o-mini`).
+- `System Prompt` (required): Prompt used to instruct the model. A sensible default is provided to extract text without summarizing.
+- `Scale (Render Zoom)`: PDF render scale (affects image resolution and token usage). Default `1.6`.
+- `Temperature`: Sampling temperature for the model. Default `0.2`.
+- `Max Parallel Requests`: Number of per‑page requests to issue concurrently. Default `1` (increase cautiously to avoid rate limits).
+
+Output
+
+- A single item per input with `json.output` (the extracted text) and `json.pages` (number of PDF pages processed).
+
+Notes
+
+- Supported input format: PDF only.
+- Each PDF page results in one Chat Completions request; costs scale with page count and render `Scale`.
+- Built‑in retry logic handles transient HTTP errors (429/5xx) with exponential backoff.
 
 ## Credentials
 
-_If users need to authenticate with the app/service, provide details here. You should include prerequisites (such as signing up with the service), available authentication methods, and how to set them up._
+Use the built‑in n8n credential type `Azure OpenAI API` (`azureOpenAiApi`).
 
-TODO ml update
+Prerequisites
+
+- An Azure OpenAI resource with a deployed, vision‑capable chat model (for example, `gpt-4o`, `gpt-4o-mini`).
+- Your resource `Endpoint` URL (e.g., `https://<your‑resource>.openai.azure.com/`).
+- An `API Key` for the resource.
+- API version supporting image inputs (default used by the node: `2024-02-15-preview`, or newer).
+
+Set up
+
+1. In n8n, create credentials of type `Azure OpenAI API`.
+2. Enter the Endpoint, API Key, and (optionally) API Version.
+3. In the node, select these credentials and specify your `Model (Deployment) Name` exactly as it’s named in Azure.
 
 ## Compatibility
 
-_State the minimum n8n version, as well as which versions you test against. You can also include any known version incompatibility issues._
-TODO ml update
+- Node.js: `>= 20.15` (see `engines` in `package.json`).
+- n8n: Community nodes must be enabled. Uses the n8n Nodes API v1.
+- Platforms: Works on common Node.js platforms without a headless browser. Rendering uses `pdfjs-dist` with `@napi-rs/canvas`.
+- Azure model requirement: A vision‑enabled chat model deployment (e.g., `gpt-4o`, `gpt-4o-mini`).
 
 ## Usage
 
-_This is an optional section. Use it to help users with any difficult or confusing aspects of the node._
+Basic flow
 
-_By the time users are looking for community nodes, they probably already know n8n basics. But if you expect new users, you can link to the [Try it out](https://docs.n8n.io/try-it-out/) documentation to help them get started._
+1. Obtain a PDF in binary form in n8n (e.g., via `HTTP Request`, `Webhook`, `Google Drive`, `S3`, etc.). The file should appear under `$binary` on the incoming item.
+2. Add the `Document To Text` node and connect it.
+3. In the `Document` field, use an expression to reference the PDF binary, for example:
+   - If your binary property is `myPdf`: `{{ $binary.myPdf.data }}`
+   - Adjust the property name to match your workflow.
+4. Select your `Azure OpenAI API` credentials and set `Model (Deployment) Name` to your Azure deployment (e.g., `gpt-4o`).
+5. Optionally adjust `Scale`, `Temperature`, and `Max Parallel Requests`.
+6. Execute the workflow. The node outputs a JSON object with:
+   - `output`: the extracted text for the whole document
+   - `pages`: the number of pages processed
 
-TODO ml update
+Tips
 
-## development
+- Start with `Max Parallel Requests = 1` to avoid `429` rate limits; increase gradually if your quota allows.
+- Higher `Scale` improves text/image detail but increases token usage and cost.
+- For very large PDFs, consider splitting or pre‑processing to control cost and execution time.
+
+## Development
 
 n8n doesn’t hot‑reload community nodes. To test locally:
 
